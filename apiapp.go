@@ -599,7 +599,7 @@ func createapi(cmd *Command, args []string) int {
 		ColorLog("[INFO] Using '%s' as 'driver'\n", driver)
 		ColorLog("[INFO] Using '%s' as 'conn'\n", conn)
 		ColorLog("[INFO] Using '%s' as 'tables'\n", tables)
-		generateAppcode(string(driver), string(conn), "3", string(tables), path.Join(curpath, args[0]))
+		generateAppcode(string(driver), string(conn), "3", string(tables), path.Join(curpath, args[0]), "models", "default")
 	} else {
 		os.Mkdir(path.Join(apppath, "models"), 0755)
 		fmt.Println("create models:", path.Join(apppath, "models"))

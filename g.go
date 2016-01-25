@@ -55,6 +55,8 @@ bee generate appcode [-tables=""] [-driver=mysql] [-conn="root:@tcp(127.0.0.1:33
              default for mysql:    root:@tcp(127.0.0.1:3306)/test
              default for postgres: postgres://postgres:postgres@127.0.0.1:5432/postgres
     -level:  [1 | 2 | 3], 1 = models; 2 = models,controllers; 3 = models,controllers,router
+    -packageName:	package name, default for models
+    -dbAliasName:	orm using default db, default for 'default', can use 'identity.DbAliasName'
 `,
 }
 
@@ -63,6 +65,8 @@ var conn docValue
 var level docValue
 var tables docValue
 var fields docValue
+var packageName docValue
+var dbAliasName docValue
 
 func init() {
 	cmdGenerate.Run = generateCode
@@ -71,6 +75,9 @@ func init() {
 	cmdGenerate.Flag.Var(&conn, "conn", "connection string used by the driver to connect to a database instance")
 	cmdGenerate.Flag.Var(&level, "level", "1 = models only; 2 = models and controllers; 3 = models, controllers and routers")
 	cmdGenerate.Flag.Var(&fields, "fields", "specify the fields want to generate.")
+
+	cmdGenerate.Flag.Var(&packageName, "packageName", "specify the package name want to generate.")
+	cmdGenerate.Flag.Var(&dbAliasName, "dbAliasName", "specify the db alise name want to generate, or use identity.DbAliasName.")
 }
 
 func generateCode(cmd *Command, args []string) int {
@@ -149,11 +156,25 @@ func generateCode(cmd *Command, args []string) int {
 		if level == "" {
 			level = "3"
 		}
+
+		if packageName == "" {
+			packageName = "models"
+		}
+		if dbAliasName == "" {
+			dbAliasName = "\"default\""
+		} else if dbAliasName != "identity.DbAliasName" {
+			dbAliasName = "\"" + dbAliasName + "\""
+		}
+
 		ColorLog("[INFO] Using '%s' as 'driver'\n", driver)
 		ColorLog("[INFO] Using '%s' as 'conn'\n", conn)
 		ColorLog("[INFO] Using '%s' as 'tables'\n", tables)
 		ColorLog("[INFO] Using '%s' as 'level'\n", level)
-		generateAppcode(driver.String(), conn.String(), level.String(), tables.String(), curpath)
+
+		ColorLog("[INFO] Using '%s' as 'packageName'\n", packageName)
+		ColorLog("[INFO] Using '%s' as 'dbAliasName'\n", dbAliasName)
+
+		generateAppcode(driver.String(), conn.String(), level.String(), tables.String(), curpath, packageName.String(), dbAliasName.String())
 	case "migration":
 		if len(args) < 2 {
 			ColorLog("[ERRO] Wrong number of arguments\n")

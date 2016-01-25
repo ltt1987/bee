@@ -255,7 +255,7 @@ func (tag *OrmTag) String() string {
 	return fmt.Sprintf("`orm:\"%s\"`", strings.Join(ormOptions, ";"))
 }
 
-func generateAppcode(driver, connStr, level, tables, currpath string) {
+func generateAppcode(driver, connStr, level, tables, currpath string, packageName, dbAliasName string) {
 	var mode byte
 	switch level {
 	case "1":
@@ -287,12 +287,12 @@ func generateAppcode(driver, connStr, level, tables, currpath string) {
 		ColorLog("[HINT] Driver must be one of mysql, postgres or sqlite\n")
 		os.Exit(2)
 	}
-	gen(driver, connStr, mode, selectedTables, currpath)
+	gen(driver, connStr, mode, selectedTables, currpath, packageName, dbAliasName)
 }
 
 // Generate takes table, column and foreign key information from database connection
 // and generate corresponding golang source files
-func gen(dbms, connStr string, mode byte, selectedTableNames map[string]bool, currpath string) {
+func gen(dbms, connStr string, mode byte, selectedTableNames map[string]bool, currpath string, packageName, dbAliasName string) {
 	db, err := sql.Open(dbms, connStr)
 	if err != nil {
 		ColorLog("[ERRO] Could not connect to %s database: %s, %s\n", dbms, connStr, err)
@@ -309,7 +309,7 @@ func gen(dbms, connStr string, mode byte, selectedTableNames map[string]bool, cu
 		mvcPath.RouterPath = path.Join(currpath, "routers")
 		createPaths(mode, mvcPath)
 		pkgPath := getPackagePath(currpath)
-		writeSourceFiles(pkgPath, tables, mode, mvcPath, selectedTableNames)
+		writeSourceFiles(pkgPath, tables, mode, mvcPath, selectedTableNames, packageName, dbAliasName)
 	} else {
 		ColorLog("[ERRO] Generating app code from %s database is not supported yet.\n", dbms)
 		os.Exit(2)
@@ -710,23 +710,26 @@ func createPaths(mode byte, paths *MvcPath) {
 // writeSourceFiles generates source files for model/controller/router
 // It will wipe the following directories and recreate them:./models, ./controllers, ./routers
 // Newly geneated files will be inside these folders.
-func writeSourceFiles(pkgPath string, tables []*Table, mode byte, paths *MvcPath, selectedTables map[string]bool) {
+func writeSourceFiles(pkgPath string, tables []*Table, mode byte, paths *MvcPath, selectedTables map[string]bool, packageName, dbAliasName string) {
 	if (O_MODEL & mode) == O_MODEL {
 		ColorLog("[INFO] Creating model files...\n")
-		writeModelFiles(tables, paths.ModelPath, selectedTables)
+		writeModelFiles(tables, paths.ModelPath, selectedTables, packageName, dbAliasName)
+		allConfirm = false
 	}
 	if (O_CONTROLLER & mode) == O_CONTROLLER {
 		ColorLog("[INFO] Creating controller files...\n")
-		writeControllerFiles(tables, paths.ControllerPath, selectedTables, pkgPath)
+		writeControllerFiles(tables, paths.ControllerPath, selectedTables, pkgPath, packageName, dbAliasName)
+		allConfirm = false
 	}
 	if (O_ROUTER & mode) == O_ROUTER {
 		ColorLog("[INFO] Creating router files...\n")
 		writeRouterFile(tables, paths.RouterPath, selectedTables, pkgPath)
+		allConfirm = false
 	}
 }
 
 // writeModelFiles generates model files
-func writeModelFiles(tables []*Table, mPath string, selectedTables map[string]bool) {
+func writeModelFiles(tables []*Table, mPath string, selectedTables map[string]bool, packageName, dbAliasName string) {
 	for _, tb := range tables {
 		// if selectedTables map is not nil and this table is not selected, ignore it
 		if selectedTables != nil {
@@ -739,7 +742,9 @@ func writeModelFiles(tables []*Table, mPath string, selectedTables map[string]bo
 		var f *os.File
 		var err error
 		if isExist(fpath) {
-			ColorLog("[WARN] %v is exist, do you want to overwrite it? Yes or No?\n", fpath)
+			if !allConfirm {
+				ColorLog("[WARN] %v is exist, do you want to overwrite it? Yes or No or All?\n", fpath)
+			}
 			if askForConfirmation() {
 				f, err = os.OpenFile(fpath, os.O_RDWR|os.O_TRUNC, 0666)
 				if err != nil {
@@ -766,6 +771,15 @@ func writeModelFiles(tables []*Table, mPath string, selectedTables map[string]bo
 		fileStr := strings.Replace(template, "{{modelStruct}}", tb.String(), 1)
 		fileStr = strings.Replace(fileStr, "{{modelName}}", camelCase(tb.Name), -1)
 		fileStr = strings.Replace(fileStr, "{{tableName}}", tb.Name, -1)
+
+		fileStr = strings.Replace(fileStr, "{{packageName}}", packageName, -1)
+		fileStr = strings.Replace(fileStr, "{{dbAliasName}}", dbAliasName, -1)
+		if dbAliasName == "identity.DbAliasName" {
+			fileStr = strings.Replace(fileStr, "{{coreRef}}", CORE_REF, -1)
+		} else {
+			fileStr = strings.Replace(fileStr, "{{coreRef}}", "", -1)
+		}
+
 		// if table contains time field, import time.Time package
 		timePkg := ""
 		importTimePkg := ""
@@ -786,7 +800,7 @@ func writeModelFiles(tables []*Table, mPath string, selectedTables map[string]bo
 }
 
 // writeControllerFiles generates controller files
-func writeControllerFiles(tables []*Table, cPath string, selectedTables map[string]bool, pkgPath string) {
+func writeControllerFiles(tables []*Table, cPath string, selectedTables map[string]bool, pkgPath string, packageName, dbAliasName string) {
 	for _, tb := range tables {
 		// if selectedTables map is not nil and this table is not selected, ignore it
 		if selectedTables != nil {
@@ -802,7 +816,9 @@ func writeControllerFiles(tables []*Table, cPath string, selectedTables map[stri
 		var f *os.File
 		var err error
 		if isExist(fpath) {
-			ColorLog("[WARN] %v is exist, do you want to overwrite it? Yes or No?\n", fpath)
+			if !allConfirm {
+				ColorLog("[WARN] %v is exist, do you want to overwrite it? Yes or No or All?\n", fpath)
+			}
 			if askForConfirmation() {
 				f, err = os.OpenFile(fpath, os.O_RDWR|os.O_TRUNC, 0666)
 				if err != nil {
@@ -822,6 +838,9 @@ func writeControllerFiles(tables []*Table, cPath string, selectedTables map[stri
 		}
 		fileStr := strings.Replace(CTRL_TPL, "{{ctrlName}}", camelCase(tb.Name), -1)
 		fileStr = strings.Replace(fileStr, "{{pkgPath}}", pkgPath, -1)
+
+		fileStr = strings.Replace(fileStr, "{{packageName}}", packageName, -1)
+
 		if _, err := f.WriteString(fileStr); err != nil {
 			ColorLog("[ERRO] Could not write controller file to %s\n", fpath)
 			os.Exit(2)
@@ -985,23 +1004,24 @@ func getPackagePath(curpath string) (packpath string) {
 		ColorLog("[ERRO] Can't generate application code outside of GOPATH '%s'\n", gopath)
 		os.Exit(2)
 	}
-	
+
 	if curpath == appsrcpath {
 		ColorLog("[ERRO] Can't generate application code outside of application PATH \n")
 		os.Exit(2)
 	}
-	
+
 	packpath = strings.Join(strings.Split(curpath[len(appsrcpath)+1:], string(filepath.Separator)), "/")
 	return
 }
 
 const (
-	STRUCT_MODEL_TPL = `package models
+	CORE_REF         = `"jiajiantech.com/core/identity"`
+	STRUCT_MODEL_TPL = `package {{packageName}}
 {{importTimePkg}}
 {{modelStruct}}
 `
 
-	MODEL_TPL = `package models
+	MODEL_TPL = `package {{packageName}}
 
 import (
 	"errors"
@@ -1009,6 +1029,7 @@ import (
 	"reflect"
 	"strings"
 	{{timePkg}}
+	{{coreRef}}
 	"github.com/astaxie/beego/orm"
 )
 
@@ -1026,16 +1047,21 @@ func init() {
 // last inserted Id on success.
 func Add{{modelName}}(m *{{modelName}}) (id int64, err error) {
 	o := orm.NewOrm()
+	o.Using({{dbAliasName}})
 	id, err = o.Insert(m)
 	return
 }
 
 // Get{{modelName}}ById retrieves {{modelName}} by Id. Returns error if
 // Id doesn't exist
-func Get{{modelName}}ById(id int) (v *{{modelName}}, err error) {
+func Get{{modelName}}ById(id int, LoadRelatedFields ...string) (v *{{modelName}}, err error) {
 	o := orm.NewOrm()
+	o.Using({{dbAliasName}})
 	v = &{{modelName}}{Id: id}
 	if err = o.Read(v); err == nil {
+		for _, f := range LoadRelatedFields {
+			o.LoadRelated(v, f)
+		}
 		return v, nil
 	}
 	return nil, err
@@ -1044,8 +1070,9 @@ func Get{{modelName}}ById(id int) (v *{{modelName}}, err error) {
 // GetAll{{modelName}} retrieves all {{modelName}} matches certain condition. Returns empty list if
 // no records exist
 func GetAll{{modelName}}(query map[string]string, fields []string, sortby []string, order []string,
-	offset int64, limit int64) (ml []interface{}, err error) {
+	offset int64, limit int64, LoadRelatedFields ...string) (ml []interface{}, err error) {
 	o := orm.NewOrm()
+	o.Using({{dbAliasName}})
 	qs := o.QueryTable(new({{modelName}}))
 	// query k=v
 	for k, v := range query {
@@ -1097,6 +1124,9 @@ func GetAll{{modelName}}(query map[string]string, fields []string, sortby []stri
 	if _, err := qs.Limit(limit, offset).All(&l, fields...); err == nil {
 		if len(fields) == 0 {
 			for _, v := range l {
+				for _, f := range LoadRelatedFields {
+					o.LoadRelated(&v, f)
+				}
 				ml = append(ml, v)
 			}
 		} else {
@@ -1119,6 +1149,7 @@ func GetAll{{modelName}}(query map[string]string, fields []string, sortby []stri
 // the record to be updated doesn't exist
 func Update{{modelName}}ById(m *{{modelName}}) (err error) {
 	o := orm.NewOrm()
+	o.Using({{dbAliasName}})
 	v := {{modelName}}{Id: m.Id}
 	// ascertain id exists in the database
 	if err = o.Read(&v); err == nil {
@@ -1134,6 +1165,7 @@ func Update{{modelName}}ById(m *{{modelName}}) (err error) {
 // the record to be deleted doesn't exist
 func Delete{{modelName}}(id int) (err error) {
 	o := orm.NewOrm()
+	o.Using({{dbAliasName}})
 	v := {{modelName}}{Id: id}
 	// ascertain id exists in the database
 	if err = o.Read(&v); err == nil {
@@ -1148,7 +1180,7 @@ func Delete{{modelName}}(id int) (err error) {
 	CTRL_TPL = `package controllers
 
 import (
-	"{{pkgPath}}/models"
+	"{{pkgPath}}/{{packageName}}"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -1172,14 +1204,14 @@ func (c *{{ctrlName}}Controller) URLMapping() {
 
 // @Title Post
 // @Description create {{ctrlName}}
-// @Param	body		body 	models.{{ctrlName}}	true		"body for {{ctrlName}} content"
-// @Success 201 {int} models.{{ctrlName}}
+// @Param	body		body 	{{packageName}}.{{ctrlName}}	true		"body for {{ctrlName}} content"
+// @Success 201 {int} {{packageName}}.{{ctrlName}}
 // @Failure 403 body is empty
 // @router / [post]
 func (c *{{ctrlName}}Controller) Post() {
-	var v models.{{ctrlName}}
+	var v {{packageName}}.{{ctrlName}}
 	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &v); err == nil {
-		if _, err := models.Add{{ctrlName}}(&v); err == nil {
+		if _, err := {{packageName}}.Add{{ctrlName}}(&v); err == nil {
 			c.Ctx.Output.SetStatus(201)
 			c.Data["json"] = v
 		} else {
@@ -1194,13 +1226,13 @@ func (c *{{ctrlName}}Controller) Post() {
 // @Title Get
 // @Description get {{ctrlName}} by id
 // @Param	id		path 	string	true		"The key for staticblock"
-// @Success 200 {object} models.{{ctrlName}}
+// @Success 200 {object} {{packageName}}.{{ctrlName}}
 // @Failure 403 :id is empty
 // @router /:id [get]
 func (c *{{ctrlName}}Controller) GetOne() {
 	idStr := c.Ctx.Input.Param(":id")
 	id, _ := strconv.Atoi(idStr)
-	v, err := models.Get{{ctrlName}}ById(id)
+	v, err := {{packageName}}.Get{{ctrlName}}ById(id)
 	if err != nil {
 		c.Data["json"] = err.Error()
 	} else {
@@ -1217,7 +1249,7 @@ func (c *{{ctrlName}}Controller) GetOne() {
 // @Param	order	query	string	false	"Order corresponding to each sortby field, if single value, apply to all sortby fields. e.g. desc,asc ..."
 // @Param	limit	query	string	false	"Limit the size of result set. Must be an integer"
 // @Param	offset	query	string	false	"Start position of result set. Must be an integer"
-// @Success 200 {object} models.{{ctrlName}}
+// @Success 200 {object} {{packageName}}.{{ctrlName}}
 // @Failure 403
 // @router / [get]
 func (c *{{ctrlName}}Controller) GetAll() {
@@ -1262,7 +1294,7 @@ func (c *{{ctrlName}}Controller) GetAll() {
 		}
 	}
 
-	l, err := models.GetAll{{ctrlName}}(query, fields, sortby, order, offset, limit)
+	l, err := {{packageName}}.GetAll{{ctrlName}}(query, fields, sortby, order, offset, limit)
 	if err != nil {
 		c.Data["json"] = err.Error()
 	} else {
@@ -1274,16 +1306,16 @@ func (c *{{ctrlName}}Controller) GetAll() {
 // @Title Update
 // @Description update the {{ctrlName}}
 // @Param	id		path 	string	true		"The id you want to update"
-// @Param	body		body 	models.{{ctrlName}}	true		"body for {{ctrlName}} content"
-// @Success 200 {object} models.{{ctrlName}}
+// @Param	body		body 	{{packageName}}.{{ctrlName}}	true		"body for {{ctrlName}} content"
+// @Success 200 {object} {{packageName}}.{{ctrlName}}
 // @Failure 403 :id is not int
 // @router /:id [put]
 func (c *{{ctrlName}}Controller) Put() {
 	idStr := c.Ctx.Input.Param(":id")
 	id, _ := strconv.Atoi(idStr)
-	v := models.{{ctrlName}}{Id: id}
+	v := {{packageName}}.{{ctrlName}}{Id: id}
 	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &v); err == nil {
-		if err := models.Update{{ctrlName}}ById(&v); err == nil {
+		if err := {{packageName}}.Update{{ctrlName}}ById(&v); err == nil {
 			c.Data["json"] = "OK"
 		} else {
 			c.Data["json"] = err.Error()
@@ -1303,7 +1335,7 @@ func (c *{{ctrlName}}Controller) Put() {
 func (c *{{ctrlName}}Controller) Delete() {
 	idStr := c.Ctx.Input.Param(":id")
 	id, _ := strconv.Atoi(idStr)
-	if err := models.Delete{{ctrlName}}(id); err == nil {
+	if err := {{packageName}}.Delete{{ctrlName}}(id); err == nil {
 		c.Data["json"] = "OK"
 	} else {
 		c.Data["json"] = err.Error()
