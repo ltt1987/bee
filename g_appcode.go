@@ -1069,7 +1069,7 @@ func Get{{modelName}}ById(id int, LoadRelatedFields ...string) (v *{{modelName}}
 
 // GetAll{{modelName}} retrieves all {{modelName}} matches certain condition. Returns empty list if
 // no records exist
-func GetAll{{modelName}}(query map[string]string, fields []string, sortby []string, order []string,
+func GetAll{{modelName}}(query map[string]interface{}, fields []string, sortby []string, order []string,
 	offset int64, limit int64, LoadRelatedFields ...string) (ml []interface{}, err error) {
 	o := orm.NewOrm()
 	o.Using({{dbAliasName}})
